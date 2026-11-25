@@ -18,7 +18,8 @@ module frostbite_tile #(
     parameter int TILE_X  = 0,
     parameter int TILE_Y  = 0,
     parameter int DATA_W  = 32,
-    parameter int FIFO_D  = 4
+    parameter int FIFO_D  = 8,
+    parameter int LATENCY = 3
 )(
     input  logic              clk,
     input  logic              rst_n,
@@ -46,14 +47,15 @@ module frostbite_tile #(
     logic [DATA_W-1:0] fifo_a  [0:FIFO_D-1];
     logic [DATA_W-1:0] fifo_b  [0:FIFO_D-1];
     logic [$clog2(FIFO_D):0] count;
+    logic [2:0]              lat_cnt;
 
     assign is_sleeping   = (count == 0) && !in_valid && !steal_grant;
     assign can_be_stolen = (count > 1);
-    assign export_op     = (count > 0) ? fifo_op[count - 1] : 3'd0;
-    assign export_a      = (count > 0) ? fifo_a[count - 1]  : '0;
-    assign export_b      = (count > 0) ? fifo_b[count - 1]  : '0;
+    assign export_op     = (count > 1) ? fifo_op[count - 1] : 3'd0;
+    assign export_a      = (count > 1) ? fifo_a[count - 1]  : '0;
+    assign export_b      = (count > 1) ? fifo_b[count - 1]  : '0;
 
-        always @* begin
+    always @* begin
         steal_req = 4'b0000;
         if (count == 0 && !in_valid) begin
             if (neighbor_avail[0])      steal_req = 4'b0001; // North
@@ -66,6 +68,7 @@ module frostbite_tile #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             count      <= '0;
+            lat_cnt    <= '0;
             out_valid  <= 1'b0;
             out_result <= '0;
             for (int j = 0; j < FIFO_D; j++) begin
@@ -78,27 +81,37 @@ module frostbite_tile #(
             next_cnt  = count;
             out_valid <= 1'b0;
 
+            // 1. Многотактная редукция головного узла очереди
             if (next_cnt > 0) begin
-                out_valid <= 1'b1;
-                case (fifo_op[0])
-                    3'd0: out_result <= fifo_a[0] + fifo_b[0];
-                    3'd1: out_result <= fifo_a[0] - fifo_b[0];
-                    3'd2: out_result <= fifo_a[0] * fifo_b[0];
-                    3'd3: out_result <= (fifo_b[0] != 0) ? (fifo_a[0] / fifo_b[0]) : '0;
-                    default: out_result <= fifo_a[0];
-                endcase
-                for (int i = 0; i < FIFO_D - 1; i++) begin
-                    fifo_op[i] <= fifo_op[i+1];
-                    fifo_a[i]  <= fifo_a[i+1];
-                    fifo_b[i]  <= fifo_b[i+1];
+                if (lat_cnt + 1 >= LATENCY) begin
+                    out_valid <= 1'b1;
+                    case (fifo_op[0])
+                        3'd0: out_result <= fifo_a[0] + fifo_b[0];
+                        3'd1: out_result <= fifo_a[0] - fifo_b[0];
+                        3'd2: out_result <= fifo_a[0] * fifo_b[0];
+                        3'd3: out_result <= (fifo_b[0] != 0) ? (fifo_a[0] / fifo_b[0]) : '0;
+                        default: out_result <= fifo_a[0];
+                    endcase
+                    for (int i = 0; i < FIFO_D - 1; i++) begin
+                        fifo_op[i] <= fifo_op[i+1];
+                        fifo_a[i]  <= fifo_a[i+1];
+                        fifo_b[i]  <= fifo_b[i+1];
+                    end
+                    next_cnt = next_cnt - 1;
+                    lat_cnt  <= '0;
+                end else begin
+                    lat_cnt <= lat_cnt + 1;
                 end
-                next_cnt = next_cnt - 1;
+            end else begin
+                lat_cnt <= '0;
             end
 
+            // 2. Сосед перехватил хвостовую задачу (Work-Stealing)
             if (steal_take && next_cnt > 0) begin
                 next_cnt = next_cnt - 1;
             end
 
+            // 3. Приём нового или перехваченного пакета
             if (in_valid && next_cnt < FIFO_D) begin
                 fifo_op[next_cnt] <= in_op;
                 fifo_a[next_cnt]  <= in_arg_a;
@@ -115,6 +128,7 @@ module frostbite_tile #(
         end
     end
 endmodule
+
 "#;
 
     let grid_rtl = format!(
@@ -342,7 +356,7 @@ module frostbite_tb;
 
         #20 rst_n = 1;
 {stimulus}
-        #100;
+        #300;
         $display("[FROSTBITE RTL] Simulation finished. Expected final: {exp_sum}");
         $finish;
     end
