@@ -19,6 +19,10 @@ Inspired by graph processor architectures without a centralized instruction pipe
   * Energy efficiency telemetry comparing the graph core against a classical sequential CPU.
 * **Hardware Bridge (SystemVerilog Export):** One-click generation of synthesizable tile grid RTL (`frostbite_grid.sv`) and a ready-to-run testbench (`frostbite_tb.sv`) for `Icarus Verilog`, `Verilator`, or FPGA synthesis.
 
+### Requirements
+* **Rust** (edition 2021+)
+* **Icarus Verilog** (`iverilog`) — optional, for running generated SystemVerilog simulations
+
 ### Quick Start
 ```bash
 git clone https://github.com/1mesles1/frostbite-sim.git
@@ -51,6 +55,10 @@ vvp sim.out
   * Живой граф активных узлов с привязкой к координатам плиток и пошаговой отладкой.
   * Телеметрия энергопотребления в сравнении с классическим последовательным CPU.
 * **Экспорт в SystemVerilog:** генерация синтезируемого RTL-кода сетки плиток (`frostbite_grid.sv`) и тестбенча (`frostbite_tb.sv`) для `Icarus Verilog`, `Verilator` и FPGA.
+
+### Требования
+* **Rust** (edition 2021+)
+* **Icarus Verilog** (`iverilog`) — опционально, для запуска симуляции сгенерированного SystemVerilog
 
 ### Быстрый старт
 ```bash
