@@ -30,6 +30,13 @@ cd frostbite-sim
 cargo run --release
 ```
 
+### Installation (Arch Linux)
+```bash
+git clone https://github.com
+cd frostbite-sim
+makepkg -si
+```
+
 ### Testing Generated SystemVerilog
 1. Click **"Generate Verilog (RTL + TB)"** inside the simulator — files are saved to `./verilog_out/`.
 2. Run gate-level simulation:
@@ -65,6 +72,13 @@ vvp sim.out
 git clone https://github.com/1mesles1/frostbite-sim.git
 cd frostbite-sim
 cargo run --release
+```
+
+### Установка (Arch Linux)
+```bash
+git clone https://github.com
+cd frostbite-sim
+makepkg -si
 ```
 
 ### Проверка сгенерированного SystemVerilog
