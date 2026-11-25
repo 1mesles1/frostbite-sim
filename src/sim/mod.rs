@@ -509,3 +509,103 @@ fn parse_factor(tokens: &[Token], pos: &mut usize) -> Result<Ast, String> {
     }
 }
 
+// ================= КОМПИЛЯТОР В АППАРАТНЫЕ ПАКЕТЫ ДЛЯ RTL =================
+
+#[derive(Clone, Debug)]
+pub struct HardwarePacket {
+    /// Код операции в RTL: 0 = ADD, 1 = SUB, 2 = MUL, 3 = DIV
+    pub op_code: u8,
+    pub op_name: &'static str,
+    pub arg_a: i64,
+    pub arg_b: i64,
+    pub expected: i64,
+}
+
+/// Разворачивает пользовательское выражение в последовательность аппаратных редукций
+pub fn compile_to_packets(expr: &str) -> Result<(Vec<HardwarePacket>, i64), String> {
+    let tokens = tokenize(expr)?;
+    if tokens.is_empty() {
+        return Err("Пустое выражение".to_string());
+    }
+    let mut pos = 0;
+    let ast = parse_expr(&tokens, &mut pos)?;
+    if pos < tokens.len() {
+        return Err(format!("Лишний токен: {:?}", tokens[pos]));
+    }
+
+    let mut packets = Vec::new();
+    let final_val = emit_ast_packets(&ast, &mut packets)?;
+    Ok((packets, final_val))
+}
+
+fn emit_ast_packets(ast: &Ast, out: &mut Vec<HardwarePacket>) -> Result<i64, String> {
+    match ast {
+        Ast::Num(v) => Ok(*v),
+        Ast::BinOp(op, lhs, rhs) => {
+            let a = emit_ast_packets(lhs, out)?;
+            let b = emit_ast_packets(rhs, out)?;
+            let (code, name, res) = match op {
+                Op::Add => (0, "ADD", a.wrapping_add(b)),
+                Op::Sub => (1, "SUB", a.wrapping_sub(b)),
+                Op::Mul => (2, "MUL", a.wrapping_mul(b)),
+                Op::Div => {
+                    if b == 0 {
+                        return Err("Деление на ноль при компиляции в RTL".to_string());
+                    }
+                    (3, "DIV", a / b)
+                }
+                _ => (0, "ADD", a + b),
+            };
+            out.push(HardwarePacket {
+                op_code: code,
+                op_name: name,
+                arg_a: a,
+                arg_b: b,
+                expected: res,
+            });
+            Ok(res)
+        }
+        Ast::Call(op, arg_ast) => {
+            let n = emit_ast_packets(arg_ast, out)?;
+            match op {
+                Op::Fib => emit_fib_packets(n, out),
+                Op::Fact => emit_fact_packets(n, out),
+                _ => Ok(0),
+            }
+        }
+    }
+}
+
+fn emit_fib_packets(n: i64, out: &mut Vec<HardwarePacket>) -> Result<i64, String> {
+    if n <= 1 {
+        return Ok(n.max(0));
+    }
+    let a = emit_fib_packets(n - 1, out)?;
+    let b = emit_fib_packets(n - 2, out)?;
+    let res = a.wrapping_add(b);
+    out.push(HardwarePacket {
+        op_code: 0,
+        op_name: "ADD",
+        arg_a: a,
+        arg_b: b,
+        expected: res,
+    });
+    Ok(res)
+}
+
+fn emit_fact_packets(n: i64, out: &mut Vec<HardwarePacket>) -> Result<i64, String> {
+    if n <= 1 {
+        return Ok(1);
+    }
+    let sub = emit_fact_packets(n - 1, out)?;
+    let res = n.wrapping_mul(sub);
+    out.push(HardwarePacket {
+        op_code: 2,
+        op_name: "MUL",
+        arg_a: n,
+        arg_b: sub,
+        expected: res,
+    });
+    Ok(res)
+}
+
