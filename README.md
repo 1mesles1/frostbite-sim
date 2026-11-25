@@ -32,7 +32,7 @@ cargo run --release
 
 ### Installation (Arch Linux)
 ```bash
-git clone https://github.com
+git clone https://github.com/1mesles1/frostbite-sim.git
 cd frostbite-sim
 makepkg -si
 ```
@@ -76,7 +76,7 @@ cargo run --release
 
 ### Установка (Arch Linux)
 ```bash
-git clone https://github.com
+git clone https://github.com/1mesles1/frostbite-sim.git
 cd frostbite-sim
 makepkg -si
 ```
