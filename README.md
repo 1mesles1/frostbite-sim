@@ -59,6 +59,15 @@ cd frostbite-sim
 cargo run --release
 ```
 
+### Проверка сгенерированного SystemVerilog
+1. Нажмите **«Сгенерировать Verilog (RTL + TB)»** внутри симулятора — файлы сохранятся в директорию `./verilog_out/`.
+2. Запустите симуляцию на уровне логических вентилей:
+```bash
+cd verilog_out
+iverilog -g2012 -o sim.out frostbite_grid.sv frostbite_tb.sv
+vvp sim.out
+```
+
 ## License / Лицензия
 MIT License — see [LICENSE](LICENSE) for details.
 
