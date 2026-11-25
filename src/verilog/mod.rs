@@ -22,51 +22,44 @@ module frostbite_tile #(
 )(
     input  logic              clk,
     input  logic              rst_n,
-    // Вход пакета из внешней шины или от роутера
     input  logic              in_valid,
     input  logic [2:0]        in_op,      // 0:ADD, 1:SUB, 2:MUL, 3:DIV
     input  logic [DATA_W-1:0] in_arg_a,
     input  logic [DATA_W-1:0] in_arg_b,
-    // Сигналы перегрузки и экспорта задач (соседям N, S, E, W)
     output logic              can_be_stolen,
     input  logic              steal_take,
     output logic [2:0]        export_op,
     output logic [DATA_W-1:0] export_a,
     output logic [DATA_W-1:0] export_b,
-    // Интерфейс перехвата задач у соседей (N, S, E, W)
     input  logic [3:0]        neighbor_avail,
     output logic [3:0]        steal_req,
     input  logic              steal_grant,
     input  logic [2:0]        steal_op,
     input  logic [DATA_W-1:0] steal_arg_a,
     input  logic [DATA_W-1:0] steal_arg_b,
-    // Выход результата и флаг сна
     output logic              out_valid,
     output logic [DATA_W-1:0] out_result,
     output logic              is_sleeping
 );
 
-    // Локальная очередь FIFO для хранения нескольких веток графа
     logic [2:0]        fifo_op [0:FIFO_D-1];
     logic [DATA_W-1:0] fifo_a  [0:FIFO_D-1];
     logic [DATA_W-1:0] fifo_b  [0:FIFO_D-1];
     logic [$clog2(FIFO_D):0] count;
 
     assign is_sleeping   = (count == 0) && !in_valid && !steal_grant;
-    // Плитка готова отдать задачу соседу, если в локальной очереди > 1 узла
     assign can_be_stolen = (count > 1);
-    assign export_op     = fifo_op[count - 1];
-    assign export_a      = fifo_a[count - 1];
-    assign export_b      = fifo_b[count - 1];
+    assign export_op     = (count > 0) ? fifo_op[count - 1] : 3'd0;
+    assign export_a      = (count > 0) ? fifo_a[count - 1]  : '0;
+    assign export_b      = (count > 0) ? fifo_b[count - 1]  : '0;
 
-    // Запрос на перехват задачи, когда своя очередь пуста
-    always_comb begin
+        always @* begin
         steal_req = 4'b0000;
         if (count == 0 && !in_valid) begin
-            if (neighbor_avail)      steal_req = 4'b0001; // North
-            else if (neighbor_avail) steal_req = 4'b0010; // South
-            else if (neighbor_avail) steal_req = 4'b0100; // East
-            else if (neighbor_avail) steal_req = 4'b1000; // West
+            if (neighbor_avail[0])      steal_req = 4'b0001; // North
+            else if (neighbor_avail[1]) steal_req = 4'b0010; // South
+            else if (neighbor_avail[2]) steal_req = 4'b0100; // East
+            else if (neighbor_avail[3]) steal_req = 4'b1000; // West
         end
     end
 
@@ -75,20 +68,24 @@ module frostbite_tile #(
             count      <= '0;
             out_valid  <= 1'b0;
             out_result <= '0;
+            for (int j = 0; j < FIFO_D; j++) begin
+                fifo_op[j] <= 3'd0;
+                fifo_a[j]  <= '0;
+                fifo_b[j]  <= '0;
+            end
         end else begin
             logic [$clog2(FIFO_D):0] next_cnt;
             next_cnt  = count;
             out_valid <= 1'b0;
 
-            // 1. Выполнение редукции головного узла очереди
             if (next_cnt > 0) begin
                 out_valid <= 1'b1;
-                case (fifo_op)
-                    3'd0: out_result <= fifo_a + fifo_b;
-                    3'd1: out_result <= fifo_a - fifo_b;
-                    3'd2: out_result <= fifo_a * fifo_b;
-                    3'd3: out_result <= (fifo_b != 0) ? (fifo_a / fifo_b) : '0;
-                    default: out_result <= fifo_a;
+                case (fifo_op[0])
+                    3'd0: out_result <= fifo_a[0] + fifo_b[0];
+                    3'd1: out_result <= fifo_a[0] - fifo_b[0];
+                    3'd2: out_result <= fifo_a[0] * fifo_b[0];
+                    3'd3: out_result <= (fifo_b[0] != 0) ? (fifo_a[0] / fifo_b[0]) : '0;
+                    default: out_result <= fifo_a[0];
                 endcase
                 for (int i = 0; i < FIFO_D - 1; i++) begin
                     fifo_op[i] <= fifo_op[i+1];
@@ -98,12 +95,10 @@ module frostbite_tile #(
                 next_cnt = next_cnt - 1;
             end
 
-            // 2. Если сосед перехватил хвостовую задачу (Work-Stealing)
             if (steal_take && next_cnt > 0) begin
                 next_cnt = next_cnt - 1;
             end
 
-            // 3. Приём новой задачи со входа или перехваченной у соседа
             if (in_valid && next_cnt < FIFO_D) begin
                 fifo_op[next_cnt] <= in_op;
                 fifo_a[next_cnt]  <= in_arg_a;
@@ -121,6 +116,7 @@ module frostbite_tile #(
     end
 endmodule
 "#;
+
     let grid_rtl = format!(
         r#"
 module frostbite_grid #(
@@ -157,8 +153,8 @@ module frostbite_grid #(
     logic              t_valid    [0:TOTAL-1];
     logic [DATA_W-1:0] t_res      [0:TOTAL-1];
 
-    // МЕЖПЛИТОЧНЫЙ АРБИТР WORK-STEALING (без центрального планировщика)
-    always_comb begin
+    // МЕЖПЛИТОЧНЫЙ АРБИТР WORK-STEALING (совместимый с Icarus Verilog)
+        always @* begin
         for (int i = 0; i < TOTAL; i++) begin
             steal_take[i]   = 1'b0;
             s_grant[i]      = 1'b0;
@@ -171,13 +167,15 @@ module frostbite_grid #(
         for (int y = 0; y < GRID_N; y++) begin
             for (int x = 0; x < GRID_N; x++) begin
                 int id, target;
-                id = y * GRID_N + x;
-                target = -1;
+                logic [3:0] req_bits;
+                id       = y * GRID_N + x;
+                req_bits = s_req[id];
+                target   = -1;
 
-                if (s_req[id][0] && y > 0)               target = (y - 1) * GRID_N + x;
-                else if (s_req[id][1] && y < GRID_N - 1) target = (y + 1) * GRID_N + x;
-                else if (s_req[id][2] && x < GRID_N - 1) target = y * GRID_N + (x + 1);
-                else if (s_req[id][3] && x > 0)          target = y * GRID_N + (x - 1);
+                if (req_bits[0] && y > 0)               target = (y - 1) * GRID_N + x;
+                else if (req_bits[1] && y < GRID_N - 1) target = (y + 1) * GRID_N + x;
+                else if (req_bits[2] && x < GRID_N - 1) target = y * GRID_N + (x + 1);
+                else if (req_bits[3] && x > 0)          target = y * GRID_N + (x - 1);
 
                 if (target >= 0 && can_steal[target] && !steal_take[target]) begin
                     steal_take[target] = 1'b1;
@@ -196,10 +194,30 @@ module frostbite_grid #(
         for (gy = 0; gy < GRID_N; gy++) begin : row
             for (gx = 0; gx < GRID_N; gx++) begin : col
                 localparam int ID = gy * GRID_N + gx;
-                assign n_avail[ID][0] = (gy > 0)          ? can_steal[(gy-1)*GRID_N + gx] : 1'b0;
-                assign n_avail[ID][1] = (gy < GRID_N - 1) ? can_steal[(gy+1)*GRID_N + gx] : 1'b0;
-                assign n_avail[ID][2] = (gx < GRID_N - 1) ? can_steal[gy*GRID_N + (gx+1)] : 1'b0;
-                assign n_avail[ID][3] = (gx > 0)          ? can_steal[gy*GRID_N + (gx-1)] : 1'b0;
+
+                if (gy > 0) begin : has_n
+                    assign n_avail[ID][0] = can_steal[(gy-1)*GRID_N + gx];
+                end else begin : no_n
+                    assign n_avail[ID][0] = 1'b0;
+                end
+
+                if (gy < GRID_N - 1) begin : has_s
+                    assign n_avail[ID][1] = can_steal[(gy+1)*GRID_N + gx];
+                end else begin : no_s
+                    assign n_avail[ID][1] = 1'b0;
+                end
+
+                if (gx < GRID_N - 1) begin : has_e
+                    assign n_avail[ID][2] = can_steal[gy*GRID_N + (gx+1)];
+                end else begin : no_e
+                    assign n_avail[ID][2] = 1'b0;
+                end
+
+                if (gx > 0) begin : has_w
+                    assign n_avail[ID][3] = can_steal[gy*GRID_N + (gx-1)];
+                end else begin : no_w
+                    assign n_avail[ID][3] = 1'b0;
+                end
 
                 frostbite_tile #(.TILE_X(gx), .TILE_Y(gy), .DATA_W(DATA_W)) u_tile (
                     .clk           (clk),
@@ -241,6 +259,7 @@ endmodule
 "#,
         n = grid_size
     );
+
 
     let rtl_code = format!("{tile_rtl}\n{grid_rtl}");
 
