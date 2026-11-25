@@ -36,6 +36,8 @@ vvp sim.out
 ```
 
 ---
+## Screenshots
+[<img src="screenshots/01.png" width="400">](screenshots/01.png) [<img src="screenshots/02.png" width="400">](screenshots/02.png)
 
 ## Русский
 
